@@ -1,76 +1,120 @@
+"use strict";
+
 const fs = require("fs");
 const { execSync } = require("child_process");
 
-const [,, jsonPath] = process.argv;
-if (!jsonPath) {
-    console.error("Usage: node solution.js test.json");
-    process.exit(1);
-}
+const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
-const colors = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
-
-
-const levelMap = {
-    "#ebedf0": 0,
-    "#9be9a8": 1,
-    "#40c463": 3,
-    "#30a14e": 6,
-    "#216e39": 11,
+const COLOR_MAP = {
+  "#ebedf0": 0,
+  "#9be9a8": 1,
+  "#40c463": 3,
+  "#30a14e": 6,
+  "#216e39": 11,
 };
 
+function readColors(path) {
+  if (!path) {
+    console.error("Usage: node solution.js file.json");
+    process.exit(1);
+  }
 
-const today = new Date();
-
-const startDate = new Date(today);
-startDate.setDate(today.getDate() - 364);
-startDate.setDate(startDate.getDate() - startDate.getDay()); 
-
-
-const numRows = 7; 
-const numCols = Math.ceil(colors.length / numRows);
-
-
-function addDays(date, days) {
-    const newDate = new Date(date);
-    newDate.setDate(newDate.getDate() + days);
-    return newDate;
+  const text = fs.readFileSync(path, "utf-8");
+  return JSON.parse(text);
 }
 
+function getStartDate(today) {
+  const start = new Date(today.getTime() - 364 * MS_IN_DAY);
 
-function randomTime(date) {
-    const hours = Math.floor(Math.random() * 12) + 8; 
-    const minutes = Math.floor(Math.random() * 60);
-    const seconds = Math.floor(Math.random() * 60);
-    const d = new Date(date);
-    d.setHours(hours, minutes, seconds);
-    return d.toISOString();
+  return new Date(
+    start.getTime() - start.getDay() * MS_IN_DAY
+  );
 }
 
-for (let row = 0; row < numRows; row++) {
-    for (let col = 0; col < numCols; col++) {
-        const idx = row * numCols + col;
-        const color = colors[idx];
-        if (!color) continue;
-        const commitsCount = levelMap[color] || 0;
-        if (commitsCount === 0) continue;
+function getColsPerRow(startDate, today) {
+  const todayDay = today.getDay();
 
-        const cellDate = addDays(startDate, col * 7 + row);
+  const totalDays =
+    Math.floor((today - startDate) / MS_IN_DAY) + 1;
 
-        for (let i = 0; i < commitsCount; i++) {
-            const timestamp = randomTime(cellDate);
-            try {
-                execSync(`git commit --allow-empty -m "Activity commit ${timestamp}"`, {
-                    env: {
-                        ...process.env,
-                        GIT_AUTHOR_DATE: timestamp,
-                        GIT_COMMITTER_DATE: timestamp,
-                    },
-                });
-            } catch (err) {
-                console.error("Git commit failed:", err.message);
-            }
-        }
+  const totalWeeks = Math.ceil(totalDays / 7);
+
+  const cols = [];
+
+  for (let row = 0; row < 7; row += 1) {
+    cols[row] =
+      row <= todayDay
+        ? totalWeeks
+        : totalWeeks - 1;
+  }
+
+  return cols;
+}
+
+function makeCommit(date) {
+  const iso = date.toISOString().slice(0, 19);
+
+  execSync(
+    `git commit --allow-empty -m "Activity commit ${iso}"`,
+    {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_DATE: iso,
+        GIT_COMMITTER_DATE: iso,
+      },
+      stdio: "ignore",
     }
+  );
 }
 
-console.log("Коммиты созданы! Не забудьте сделать git push.");
+function run(colors) {
+  const today = new Date();
+
+  const startDate = getStartDate(today);
+
+  const colsPerRow = getColsPerRow(
+    startDate,
+    today
+  );
+
+  let index = 0;
+
+  for (let row = 0; row < 7; row += 1) {
+    for (
+      let col = 0;
+      col < colsPerRow[row];
+      col += 1
+    ) {
+      if (index >= colors.length) {
+        return;
+      }
+
+      const color = colors[index];
+      index += 1;
+
+      const commits =
+        COLOR_MAP[color] ?? 0;
+
+      const cellDate = new Date(
+        startDate.getTime() +
+          (col * 7 + row) * MS_IN_DAY
+      );
+
+      if (cellDate > today) {
+        continue;
+      }
+
+      for (let i = 0; i < commits; i += 1) {
+        makeCommit(cellDate);
+      }
+    }
+  }
+}
+
+const file = process.argv[2];
+
+const colors = readColors(file);
+
+run(colors);
+
+console.log("Done");
