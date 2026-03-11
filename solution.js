@@ -3,9 +3,7 @@
 const fs = require("fs");
 const { execSync } = require("child_process");
 
-const MS_IN_DAY = 24 * 60 * 60 * 1000;
-
-const COLOR_MAP = {
+const COMMITS_BY_COLOR = {
   "#ebedf0": 0,
   "#9be9a8": 1,
   "#40c463": 3,
@@ -13,108 +11,104 @@ const COLOR_MAP = {
   "#216e39": 11,
 };
 
-function readColors(path) {
-  if (!path) {
-    console.error("Usage: node solution.js file.json");
+function readColors(filePath) {
+  if (!filePath) {
+    console.error("Usage: node solution.js <file.json>");
     process.exit(1);
   }
 
-  const text = fs.readFileSync(path, "utf-8");
-  return JSON.parse(text);
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
 }
 
 function getStartDate(today) {
-  const start = new Date(today.getTime() - 364 * MS_IN_DAY);
-
-  return new Date(
-    start.getTime() - start.getDay() * MS_IN_DAY
-  );
+  const dayStart = startOfDay(today);
+  const yearWindowStart = addDays(dayStart, -364);
+  return addDays(yearWindowStart, -yearWindowStart.getDay());
 }
 
-function getColsPerRow(startDate, today) {
-  const todayDay = today.getDay();
-
-  const totalDays =
-    Math.floor((today - startDate) / MS_IN_DAY) + 1;
-
+function getColumnsPerRow(startDate, today) {
+  const todayStart = startOfDay(today);
+  const totalDays = Math.floor((todayStart - startDate) / (24 * 60 * 60 * 1000)) + 1;
   const totalWeeks = Math.ceil(totalDays / 7);
+  const todayDayOfWeek = todayStart.getDay();
 
-  const cols = [];
-
-  for (let row = 0; row < 7; row += 1) {
-    cols[row] =
-      row <= todayDay
-        ? totalWeeks
-        : totalWeeks - 1;
-  }
-
-  return cols;
-}
-
-function makeCommit(date) {
-  const iso = date.toISOString().slice(0, 19);
-
-  execSync(
-    `git commit --allow-empty -m "Activity commit ${iso}"`,
-    {
-      env: {
-        ...process.env,
-        GIT_AUTHOR_DATE: iso,
-        GIT_COMMITTER_DATE: iso,
-      },
-      stdio: "ignore",
-    }
+  return Array.from({ length: 7 }, (_, row) =>
+    row <= todayDayOfWeek ? totalWeeks : totalWeeks - 1
   );
 }
 
-function run(colors) {
+function formatTimestamp(date, serial) {
+  const commitDate = new Date(date);
+  commitDate.setHours(12, 0, serial, 0);
+
+  const year = commitDate.getFullYear();
+  const month = String(commitDate.getMonth() + 1).padStart(2, "0");
+  const day = String(commitDate.getDate()).padStart(2, "0");
+  const hours = String(commitDate.getHours()).padStart(2, "0");
+  const minutes = String(commitDate.getMinutes()).padStart(2, "0");
+  const seconds = String(commitDate.getSeconds()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+function makeCommit(timestamp) {
+  execSync(`git commit --allow-empty -m "Activity commit ${timestamp}"`, {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_DATE: timestamp,
+      GIT_COMMITTER_DATE: timestamp,
+    },
+    stdio: "ignore",
+  });
+}
+
+function createCommits(colors) {
   const today = new Date();
-
   const startDate = getStartDate(today);
+  const columnsPerRow = getColumnsPerRow(startDate, today);
 
-  const colsPerRow = getColsPerRow(
-    startDate,
-    today
-  );
-
-  let index = 0;
+  let colorIndex = 0;
 
   for (let row = 0; row < 7; row += 1) {
-    for (
-      let col = 0;
-      col < colsPerRow[row];
-      col += 1
-    ) {
-      if (index >= colors.length) {
+    for (let col = 0; col < columnsPerRow[row]; col += 1) {
+      if (colorIndex >= colors.length) {
         return;
       }
 
-      const color = colors[index];
-      index += 1;
+      const color = String(colors[colorIndex]).toLowerCase();
+      colorIndex += 1;
 
-      const commits =
-        COLOR_MAP[color] ?? 0;
+      const commitsCount = COMMITS_BY_COLOR[color] ?? 0;
+      if (commitsCount === 0) {
+        continue;
+      }
 
-      const cellDate = new Date(
-        startDate.getTime() +
-          (col * 7 + row) * MS_IN_DAY
-      );
-
+      const cellDate = addDays(startDate, col * 7 + row);
       if (cellDate > today) {
         continue;
       }
 
-      for (let i = 0; i < commits; i += 1) {
-        makeCommit(cellDate);
+      for (let i = 0; i < commitsCount; i += 1) {
+        makeCommit(formatTimestamp(cellDate, i));
       }
     }
   }
 }
 
-const file = process.argv[2];
+function main() {
+  const filePath = process.argv[2];
+  const colors = readColors(filePath);
+  createCommits(colors);
+}
 
-const colors = readColors(file);
-
-run(colors);
-
-console.log("Done");
+main();
